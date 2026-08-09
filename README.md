@@ -1,4 +1,4 @@
-# coding-cli
+# coding-agent-cli
 
 To install dependencies:
 
