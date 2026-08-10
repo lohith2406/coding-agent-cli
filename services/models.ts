@@ -1,13 +1,7 @@
 import axios from "axios";
 
-type Model = {
-    id: string;
-}
-
 type Provider = {
-    id: string;
-    name: string
-    models: Record<string, Model>;
+    models: Record<string, unknown>;
 }
 
 export type Catalog = Record<string, Provider>;

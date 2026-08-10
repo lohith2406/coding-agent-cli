@@ -10,8 +10,8 @@ export const modelsCommand = new Command("models")
         for (const [provider, data] of Object.entries(catalog)) {
             console.log(provider);
 
-            for (const model of Object.values(data.models)) {
-                console.log(`   ${model.id}`)
+            for (const model of Object.keys(data.models)) {
+                console.log(`   ${model}`)
             }
         };
     })
