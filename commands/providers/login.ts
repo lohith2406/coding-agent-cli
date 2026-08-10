@@ -1,33 +1,27 @@
 import { Command } from "commander";
-import os from "os";
-import path from "path";
-import fs from "fs";
-
-type Auth = {
-    type: string;
-    key: string;
-};
+import { readAuth, writeAuth } from "../../services/auth";
+import { getCatalog } from "../../services/models";
 
 export const loginCommand = new Command("login")
-    .description("Log in to a provider (use it as default")
-    .requiredOption("-p, --provider <providerName>", "Name of the provider (gemini, claude etc)")
+    .description("Log in to a provider (use it as default)")
+    .requiredOption("-p, --provider <providerName>", "Name of the provider (anthropic, google, openai etc)")
     .requiredOption("-a, --api-key <apiKey>", "Your api key")
-    .action((options) => {
-        const authDir = path.join(os.homedir(), ".local", "share", "coding-agent-cli");
-        const authPath = path.join(authDir, "auth.json");
+    .action(async (options) => {
+        const catalog = await getCatalog();
 
-        fs.mkdirSync(authDir, { recursive: true }); // recursive: true = create if doesn't exist
-
-        let auth: Record<string, Auth> = {};
-        
-        if (fs.existsSync(authPath)) {
-            auth = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+        if (!(options.provider in catalog)) {
+            console.error(`Unknown provider ${options.provider}.`);
+            process.exitCode = 1; // so that && commands fail too
+            return;
         }
+
+        const auth = readAuth();
 
         auth[options.provider] = {
             type: "api",
             key: options.apiKey
-        };
+        }
 
-        fs.writeFileSync(authPath, JSON.stringify(auth, null, 2));
+        writeAuth(auth);
+        console.log(`Logged in to ${options.provider}`);
     })

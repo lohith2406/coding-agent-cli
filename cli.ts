@@ -11,4 +11,4 @@ program
     .addCommand(modelsCommand)
     .addCommand(agentCommand);
 
-program.parse();
+await program.parseAsync();

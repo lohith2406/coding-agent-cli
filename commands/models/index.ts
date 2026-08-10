@@ -1,13 +1,13 @@
 import { Command } from "commander";
 import { setModelCommand } from "./set";
-import { getModels } from "../../services/models";
+import { getCatalog } from "../../services/models";
 
 export const modelsCommand = new Command("models")
     .description("List all supported models")
     .action(async () => {
-        const models = await getModels();
+        const catalog = await getCatalog();
         
-        for (const [provider, data] of Object.entries(models)) {
+        for (const [provider, data] of Object.entries(catalog)) {
             console.log(provider);
 
             for (const model of Object.values(data.models)) {

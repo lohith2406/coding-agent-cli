@@ -6,14 +6,15 @@ type Model = {
 
 type Provider = {
     id: string;
+    name: string
     models: Record<string, Model>;
 }
 
-type Models = Record<string, Provider>;
+export type Catalog = Record<string, Provider>;
 
-const MODELS_URL = "https://models.dev/api.json";
+const CATALOG_URL = "https://models.dev/api.json";
 
-export async function getModels() {
-    const response = await axios.get<Models>(MODELS_URL);
+export async function getCatalog() {
+    const response = await axios.get<Catalog>(CATALOG_URL);
     return response.data;
 }
