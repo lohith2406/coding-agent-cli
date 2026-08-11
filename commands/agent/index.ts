@@ -4,6 +4,16 @@ import { readAuth } from "../../services/auth";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs"
 
+type ToolCall = { 
+    type: string; 
+    id: string; 
+    name: string; 
+    arguments: { 
+        path: string;
+        content?: string;
+    } 
+}
+
 const readFileTool = {
     type: "function" as const,
     name: "read_file",
@@ -16,6 +26,29 @@ const readFileTool = {
         required: ["path"]
     }
 };
+
+const writeFileTool = {
+    type: "function" as const,
+    name: "write_file",
+    description: "Write content to a file on the local file system, creating or overwriting it",
+    parameters: {
+        type: "object",
+        properties: {
+            path: { type: "string", description: "Path to the file" },
+            content: { type: "string", description: "Full content to write to the file" }
+        },
+        required: ["path", "content"]
+    }
+};
+
+function executeTool(name: string, args: { path: string, content?: string}): string {
+    if (name === "write_file") {
+        fs.writeFileSync(args.path, args.content ?? "", "utf-8");
+        return `Wrote ${args.content?.length ?? 0} bytes to ${args.path}`;
+    }
+
+    return fs.readFileSync(args.path, "utf-8");
+}
 
 export const agentCommand = new Command("agent")
     .description("Runs the agent")
@@ -41,17 +74,18 @@ export const agentCommand = new Command("agent")
         let input = options.prompt;
         let previous_interaction_id: string | undefined;
 
-        for (let turn = 0; turn < 10; turn++ ) {
+        while (true) {
             const stream = await ai.interactions.create({
                 model: config.model,
+                system_instruction: "You are a coding agent. Use the tools to read and write files",
                 input,
                 stream: true,
-                tools: [readFileTool],
+                tools: [readFileTool, writeFileTool],
                 previous_interaction_id
             });
     
             const currentCalls = new Map();
-            let toolCalls: { type: string; id: string; name: string; arguments: { path: string } }[] = [];
+            let toolCalls: ToolCall[] = [];
     
             for await (const event of stream) {
                 const evType = event.event_type;
@@ -81,18 +115,22 @@ export const agentCommand = new Command("agent")
                         name: call.name,
                         arguments: call.arguments ? JSON.parse(call.arguments) : {}
                     }));
+                } else if (evType === 'error') {
+                    console.error(`Error: ${event.error?.message ?? "unknown error"}`);
+                    process.exitCode = 1;
+                    return;
                 }
             }
     
             if (toolCalls.length === 0) {
                 return;
             }
-    
+
             input = toolCalls.map(call => ({
                 type: "function_result",
                 call_id: call.id,
                 name: call.name,
-                result: fs.readFileSync(call.arguments.path, "utf-8")
+                result: executeTool(call.name, call.arguments)
             }));
         }
     });
