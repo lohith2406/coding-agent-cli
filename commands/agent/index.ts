@@ -3,16 +3,35 @@ import { readConfig } from "../../services/config";
 import { readAuth } from "../../services/auth";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs"
+import { execSync } from "child_process";
+import readline from "readline";
 
-type ToolCall = { 
-    type: string; 
+type ReadFileToolCall = { 
     id: string; 
-    name: string; 
+    name: "read_file"; 
     arguments: { 
-        path: string;
-        content?: string;
+        path: string 
     } 
 }
+
+type WriteFileToolCall = { 
+    id: string; 
+    name: "write_file"; 
+    arguments: { 
+        path: string;
+        content: string;
+    } 
+}
+
+type BashToolCall = { 
+    id: string; 
+    name: "bash"; 
+    arguments: { 
+        command: string 
+    } 
+}
+
+type ToolCall = ReadFileToolCall | WriteFileToolCall | BashToolCall;
 
 const readFileTool = {
     type: "function" as const,
@@ -41,13 +60,42 @@ const writeFileTool = {
     }
 };
 
-function executeTool(name: string, args: { path: string, content?: string}): string {
-    if (name === "write_file") {
-        fs.writeFileSync(args.path, args.content ?? "", "utf-8");
-        return `Wrote ${args.content?.length ?? 0} bytes to ${args.path}`;
+const bashTool = {
+    type: "function" as const,
+    name: "bash",
+    description: "Run a shell command in the current directory and return its output",
+    parameters: {
+        type: "object",
+        properties: {
+            command: { type: "string", description: "The shell command to run" },
+        },
+        required: ["command"]
     }
+}
 
-    return fs.readFileSync(args.path, "utf-8");
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout})
+
+function askQuestion(question: string) {
+    return new Promise<string>((resolve) => {
+        rl.question(question, (answer) => {
+            resolve(answer);
+        })
+    })
+}
+async function executeTool(call: ToolCall): Promise<string> {
+    if (call.name === "write_file") {
+        fs.writeFileSync(call.arguments.path, call.arguments.content, "utf-8");
+        return `Wrote ${call.arguments.content.length} bytes to ${call.arguments.path}`;
+    } else if (call.name === "read_file") {
+        return fs.readFileSync(call.arguments.path, "utf-8");
+    } else {
+        console.log(call.arguments.command);
+        const answer = await askQuestion("Run this command (y/n) ");
+        if (answer.trim().toLowerCase() !== "y") {
+            return "User denied this command"
+        }
+        return execSync(call.arguments.command, { cwd: process.cwd(), encoding: "utf8"});
+    }
 }
 
 export const agentCommand = new Command("agent")
@@ -77,10 +125,10 @@ export const agentCommand = new Command("agent")
         while (true) {
             const stream = await ai.interactions.create({
                 model: config.model,
-                system_instruction: "You are a coding agent. Use the tools to read and write files",
+                system_instruction: "You are a coding agent. You can read files, write to files or run bash commands",
                 input,
                 stream: true,
-                tools: [readFileTool, writeFileTool],
+                tools: [readFileTool, writeFileTool, bashTool],
                 previous_interaction_id
             });
     
@@ -110,7 +158,6 @@ export const agentCommand = new Command("agent")
                     }
                 } else if (evType === 'interaction.completed') {
                     toolCalls = Array.from(currentCalls.values()).map(call => ({
-                        type: 'function_call',
                         id: call.id,
                         name: call.name,
                         arguments: call.arguments ? JSON.parse(call.arguments) : {}
@@ -125,12 +172,17 @@ export const agentCommand = new Command("agent")
             if (toolCalls.length === 0) {
                 return;
             }
+            
+            const results = [];
+            for (const call of toolCalls) { //for...of runs tools one at a time. an async map would start them all at once and show several y/n prompts together
+                results.push({
+                    type: "function_result",
+                    name: call.name,
+                    call_id: call.id,
+                    result: await executeTool(call) // await inside for...of pauses until tool finishes before the next one starts
+                })
+            }
 
-            input = toolCalls.map(call => ({
-                type: "function_result",
-                call_id: call.id,
-                name: call.name,
-                result: executeTool(call.name, call.arguments)
-            }));
+            input = results;
         }
     });

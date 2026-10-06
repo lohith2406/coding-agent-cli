@@ -73,4 +73,17 @@ Commit your work before pointing the agent at a repository you care about.
 | `~/.local/share/coding-agent-cli/auth.json` | API keys, per provider |
 | `~/.local/share/coding-agent-cli/config.json` | Default provider and model |
 
+## Future plan
+
+- **Permission choices**: answer `always` to allow a tool for the rest of the session, and a `--yes` flag to skip prompts. Today every bash command asks y/n.
+- **Permission prompts for `write_file`** as well as bash.
+- **Path guard**: refuse `read_file` and `write_file` paths outside the current directory.
+- **Timeout** on bash commands, so a hanging command can't hang the agent.
+- **Output truncation**: cap tool results (around 10,000 characters) so one big output can't fill the model's context.
+- **Async bash**: run commands without blocking, and stream output live (`spawn` instead of `execSync`).
+- **Errors as results**: a failed tool returns its error to the model instead of crashing the agent.
+- **Typed tool arguments**: one zod schema per tool for validation, types and the JSON schema sent to the model.
+- **Provider-agnostic models**: a shared message format, with adapters for Anthropic, OpenAI and Gemini.
+- **Loop cap**: stop after a set number of steps.
+
 Built with [Bun](https://bun.com).
