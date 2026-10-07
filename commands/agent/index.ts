@@ -33,6 +33,13 @@ type BashToolCall = {
 
 type ToolCall = ReadFileToolCall | WriteFileToolCall | BashToolCall;
 
+type FunctionResult = { 
+    type: "function_result"; 
+    name: string; 
+    call_id: string; 
+    result: string 
+};
+
 const readFileTool = {
     type: "function" as const,
     name: "read_file",
@@ -94,14 +101,84 @@ async function executeTool(call: ToolCall): Promise<string> {
         if (answer.trim().toLowerCase() !== "y") {
             return "User denied this command"
         }
-        return execSync(call.arguments.command, { cwd: process.cwd(), encoding: "utf8"});
+        try {
+            return execSync(call.arguments.command, { cwd: process.cwd(), encoding: "utf8"});
+        } catch (err: any) {
+            return `Command failed (exit ${err.status})\n${err.stdout ?? ""}${err.stderr ?? ""}`;
+        }
+    }
+}
+
+async function agentLoop(ai: GoogleGenAI, model: string, prompt: string, previousId: string | undefined): Promise<string | undefined> {
+    let input: string | FunctionResult[] = prompt;
+    while (true) {
+        const stream = await ai.interactions.create({
+            model,
+            system_instruction: "You are a coding agent. You can read files, write to files or run bash commands",
+            input,
+            stream: true,
+            tools: [readFileTool, writeFileTool, bashTool],
+            previous_interaction_id: previousId
+        });
+
+        const currentCalls = new Map();
+        let toolCalls: ToolCall[] = [];
+
+        for await (const event of stream) {
+            const evType = event.event_type;
+            if (evType === 'interaction.created') {
+                previousId = event.interaction.id;
+            }
+            else if (evType === 'step.start') {
+                if (event.step.type === 'function_call') {
+                    currentCalls.set(event.index, {
+                        id: event.step.id,
+                        name: event.step.name,
+                        arguments: ''
+                    });
+                }
+            } else if (evType === 'step.delta') {
+                if (event.delta.type === 'arguments_delta') {
+                    if (currentCalls.has(event.index)) {
+                        currentCalls.get(event.index).arguments += event.delta.arguments;
+                    }
+                } else if (event.delta.type === 'text') {
+                    process.stdout.write(event.delta.text);
+                }
+            } else if (evType === 'interaction.completed') {
+                toolCalls = Array.from(currentCalls.values()).map(call => ({
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments ? JSON.parse(call.arguments) : {}
+                }));
+            } else if (evType === 'error') {
+                console.error(`Error: ${event.error?.message ?? "unknown error"}`);
+                process.exitCode = 1;
+                return previousId;
+            }
+        }
+
+        if (toolCalls.length === 0) {
+            return previousId;
+        }
+        
+        const results: FunctionResult[] = [];
+        for (const call of toolCalls) { //for...of runs tools one at a time. an async map would start them all at once and show several y/n prompts together
+            results.push({
+                type: "function_result",
+                name: call.name,
+                call_id: call.id,
+                result: await executeTool(call) // await inside for...of pauses until tool finishes before the next one starts
+            })
+        }
+
+        input = results;
     }
 }
 
 export const agentCommand = new Command("agent")
     .description("Runs the agent")
-    .requiredOption("-p, --prompt <prompt>", "Prompt")
-    .action(async (options) => {
+    .action(async () => {
         const config = readConfig();
         if (!config.provider || !config.model) {
             console.error("No default model set. Try: opencode models set -p anthropic <model>");
@@ -119,70 +196,13 @@ export const agentCommand = new Command("agent")
 
         const ai = new GoogleGenAI({ apiKey: entry.key });
 
-        let input = options.prompt;
-        let previous_interaction_id: string | undefined;
+        let previousId: string | undefined;
 
         while (true) {
-            const stream = await ai.interactions.create({
-                model: config.model,
-                system_instruction: "You are a coding agent. You can read files, write to files or run bash commands",
-                input,
-                stream: true,
-                tools: [readFileTool, writeFileTool, bashTool],
-                previous_interaction_id
-            });
-    
-            const currentCalls = new Map();
-            let toolCalls: ToolCall[] = [];
-    
-            for await (const event of stream) {
-                const evType = event.event_type;
-                if (evType === 'interaction.created') {
-                    previous_interaction_id = event.interaction.id;
-                }
-                else if (evType === 'step.start') {
-                    if (event.step.type === 'function_call') {
-                        currentCalls.set(event.index, {
-                            id: event.step.id,
-                            name: event.step.name,
-                            arguments: ''
-                        });
-                    }
-                } else if (evType === 'step.delta') {
-                    if (event.delta.type === 'arguments_delta') {
-                        if (currentCalls.has(event.index)) {
-                            currentCalls.get(event.index).arguments += event.delta.arguments;
-                        }
-                    } else if (event.delta.type === 'text') {
-                        process.stdout.write(event.delta.text);
-                    }
-                } else if (evType === 'interaction.completed') {
-                    toolCalls = Array.from(currentCalls.values()).map(call => ({
-                        id: call.id,
-                        name: call.name,
-                        arguments: call.arguments ? JSON.parse(call.arguments) : {}
-                    }));
-                } else if (evType === 'error') {
-                    console.error(`Error: ${event.error?.message ?? "unknown error"}`);
-                    process.exitCode = 1;
-                    return;
-                }
-            }
-    
-            if (toolCalls.length === 0) {
-                return;
-            }
-            
-            const results = [];
-            for (const call of toolCalls) { //for...of runs tools one at a time. an async map would start them all at once and show several y/n prompts together
-                results.push({
-                    type: "function_result",
-                    name: call.name,
-                    call_id: call.id,
-                    result: await executeTool(call) // await inside for...of pauses until tool finishes before the next one starts
-                })
-            }
-
-            input = results;
+            const line = (await askQuestion("> ")).trim();
+            if (line === "exit") break;
+            previousId = await agentLoop(ai, config.model, line, previousId);
         }
+
+        rl.close();
     });
