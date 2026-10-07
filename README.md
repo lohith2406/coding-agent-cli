@@ -52,16 +52,26 @@ bun cli.ts models set -p google gemini-2.5-flash
 ### Agent
 
 ```bash
-bun cli.ts agent -p "what dependencies are in package.json?"
+bun cli.ts agent
 ```
 
-The agent loops: it may ask to call a tool, the CLI runs it and sends the result
-back, and this repeats until the model answers. Available tools:
+Starts a chat. Type a request at the `>` prompt; the agent keeps the conversation,
+so follow-up questions can refer to earlier answers. Type `exit` to quit.
+
+For each request the agent loops: the model may ask to call tools, the CLI runs
+them one at a time and sends all the results back, and this repeats until the
+model answers. Available tools:
 
 | Tool | Description |
 | --- | --- |
 | `read_file` | Read a file from the local filesystem |
 | `write_file` | Create or overwrite a file |
+| `bash` | Run a shell command in the current directory |
+
+Every `bash` command is shown first and runs only if you answer `y`; answering
+`n` tells the model the command was denied, and it carries on without it. A
+command that fails returns its exit code and output to the model rather than
+stopping the agent.
 
 `write_file` overwrites whatever path the model names, with no confirmation.
 Commit your work before pointing the agent at a repository you care about.
@@ -81,9 +91,13 @@ Commit your work before pointing the agent at a repository you care about.
 - **Timeout** on bash commands, so a hanging command can't hang the agent.
 - **Output truncation**: cap tool results (around 10,000 characters) so one big output can't fill the model's context.
 - **Async bash**: run commands without blocking, and stream output live (`spawn` instead of `execSync`).
-- **Errors as results**: a failed tool returns its error to the model instead of crashing the agent.
+- **Errors as results for every tool**: `bash` already does this; a missing file in `read_file` still stops the agent.
 - **Typed tool arguments**: one zod schema per tool for validation, types and the JSON schema sent to the model.
 - **Provider-agnostic models**: a shared message format, with adapters for Anthropic, OpenAI and Gemini.
 - **Loop cap**: stop after a set number of steps.
+- **Quit from a prompt**: answer `q` at a y/n prompt to stop the current request.
+- **Typing while the agent works**: queue a message and hand it to the model at the next step (needs a TUI, e.g. Ink).
+- **Saved sessions and memory**: resume past conversations, and keep project facts in a memory file between sessions.
+- **Compaction**: summarise older turns once a conversation gets long, to stay within the context window.
 
 Built with [Bun](https://bun.com).
