@@ -91,10 +91,18 @@ function askQuestion(question: string) {
 }
 async function executeTool(call: ToolCall): Promise<string> {
     if (call.name === "write_file") {
-        fs.writeFileSync(call.arguments.path, call.arguments.content, "utf-8");
-        return `Wrote ${call.arguments.content.length} bytes to ${call.arguments.path}`;
+        try {
+            fs.writeFileSync(call.arguments.path, call.arguments.content, "utf-8");
+            return `Wrote ${call.arguments.content.length} bytes to ${call.arguments.path}`;
+        } catch (err: any) {
+            return `Error: ${err.message}`;
+        }
     } else if (call.name === "read_file") {
-        return fs.readFileSync(call.arguments.path, "utf-8");
+        try {
+            return fs.readFileSync(call.arguments.path, "utf-8");
+        } catch (err: any) {
+            return `Error: ${err.message}`;
+        }
     } else {
         console.log(call.arguments.command);
         const answer = await askQuestion("Run this command (y/n) ");
